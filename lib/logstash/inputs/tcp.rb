@@ -176,14 +176,14 @@ class LogStash::Inputs::Tcp < LogStash::Inputs::Base
     @loop.close rescue nil
   end
 
-  def decode_buffer(client_ip_address, client_address, client_port, codec, proxy_address,
+  def decode_buffer(client_ip_address, client_address, client_port, ssl_subject_str, codec, proxy_address,
                     proxy_port, tbuf)
     codec.decode(tbuf) do |event|
       if @proxy_protocol
         event.set(PROXY_HOST_FIELD, proxy_address) unless event.get(PROXY_HOST_FIELD)
         event.set(PROXY_PORT_FIELD, proxy_port) unless event.get(PROXY_PORT_FIELD)
       end
-      enqueue_decorated(event, client_ip_address, client_address, client_port)
+      enqueue_decorated(event, client_ip_address, client_address, client_port, ssl_subject_str)
     end
   end
 
@@ -238,6 +238,12 @@ class LogStash::Inputs::Tcp < LogStash::Inputs::Base
     client_address = socket.peeraddr[3]
     client_ip_address = socket.peeraddr[2]
     client_port = socket.peeraddr[1]
+    ssl_subject_str = nil
+
+    if @ssl_enable && @ssl_verify
+      ssl_subject_str = socket.peer_cert.subject.to_s
+    end
+
     peer = "#{client_address}:#{client_port}"
     first_read = true
     codec = @codec.clone
@@ -260,7 +266,7 @@ class LogStash::Inputs::Tcp < LogStash::Inputs::Base
           client_ip_address = ''
         end
       end
-      decode_buffer(client_ip_address, client_address, client_port, codec, proxy_address,
+      decode_buffer(client_ip_address, client_address, client_port, ssl_subject_str, codec, proxy_address,
                     proxy_port, tbuf)
     end
   rescue EOFError
@@ -279,14 +285,15 @@ class LogStash::Inputs::Tcp < LogStash::Inputs::Base
     socket.close rescue nil
 
     codec.respond_to?(:flush) && codec.flush do |event|
-      enqueue_decorated(event, client_ip_address, client_address, client_port)
+      enqueue_decorated(event, client_ip_address, client_address, client_port, ssl_subject_str)
     end
   end
 
-  def enqueue_decorated(event, client_ip_address, client_address, client_port)
+  def enqueue_decorated(event, client_ip_address, client_address, client_port, ssl_subject_str)
     event.set(HOST_FIELD, client_address) unless event.get(HOST_FIELD)
     event.set(HOST_IP_FIELD, client_ip_address) unless event.get(HOST_IP_FIELD)
     event.set(PORT_FIELD, client_port) unless event.get(PORT_FIELD)
+    event.set(SSLSUBJECT_FIELD, ssl_subject_str) unless event.get(SSLSUBJECT_FIELD) or ssl_subject_str.nil?
     decorate(event)
     @output_queue << event
   end
@@ -316,7 +323,7 @@ class LogStash::Inputs::Tcp < LogStash::Inputs::Base
 
   def load_cert_store
     cert_store = OpenSSL::X509::Store.new
-    cert_store.set_default_paths
+    #cert_store.set_default_paths
     @ssl_extra_chain_certs.each do |cert|
       cert_store.add_file(cert)
     end
