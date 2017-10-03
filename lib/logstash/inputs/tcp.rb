@@ -323,7 +323,7 @@ class LogStash::Inputs::Tcp < LogStash::Inputs::Base
 
   def load_cert_store
     cert_store = OpenSSL::X509::Store.new
-    #cert_store.set_default_paths
+    cert_store.set_default_paths
     @ssl_extra_chain_certs.each do |cert|
       cert_store.add_file(cert)
     end
